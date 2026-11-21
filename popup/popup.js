@@ -95,6 +95,12 @@ function showMenu(event, group, link = null) {
   }, "menu-item");
   open.append(icon("external-link"), el("span", "", "Open")); open.disabled = !link && !group.links.length; actions.push(open);
   if (!link) {
+    const rename = button("", `Rename ${group.name}`, () => {
+      const header = menuOrigin.closest(".group-header") || menuOrigin.querySelector(".group-header");
+      hideMenu();
+      if (header) renameGroup(header, group);
+    }, "menu-item");
+    rename.append(icon("pencil"), el("span", "", "Rename group")); actions.push(rename);
     const remove = button("", `Delete ${group.name} and its saved tabs`, () => {
       hideMenu();
       run(async () => { await request("DELETE_GROUP", { groupId: group.id }); await refreshState(); $("#workspace").focus({ preventScroll: true }); });
@@ -172,7 +178,7 @@ function renderGroup(group) {
   card.style.setProperty("--group-color", COLORS[group.color] || "#70897a");
   const header = el("div", "group-header"); header.tabIndex = 0;
   header.dataset.dragKind = "group"; header.dataset.sourceId = group.id; header.dataset.focusKey = group.id;
-  header.setAttribute("role", "group"); header.setAttribute("aria-label", `${group.name}. Double-click to rename. Right-click to open. Hold and drag to move.`);
+  header.setAttribute("role", "group"); header.setAttribute("aria-label", `${group.name}. Double-click or press F2 to rename. Right-click for actions. Hold and drag to move.`);
   header.append(el("span", "group-dot"), el("span", "group-name", group.name), el("span", "group-size", String(group.links.length)));
   const toggle = button("", `${group.collapsed ? "Expand" : "Collapse"} ${group.name}`, event => { event.stopPropagation(); toggleGroup(group); }, "group-collapse");
   toggle.dataset.focusKey = `collapse:${group.id}`;

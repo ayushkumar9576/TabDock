@@ -37,7 +37,21 @@ try {
   await poll(async () => (await call("GET_STATE")).groups.find(item => item.id === group.id).links.length === 1);
   await ready();
   await evaluate(`document.querySelector('.tab-group[data-entry-id="${group.id}"]').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:50,clientY:120}))`);
-  assert.deepEqual(await evaluate("[...document.querySelectorAll('#context-menu button')].map(node=>node.textContent)"), ["Open", "Delete group"]);
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('#context-menu button')].map(node=>node.textContent)"), ["Open", "Rename group", "Delete group"]);
+  await evaluate("[...document.querySelectorAll('#context-menu button')].find(node=>node.textContent==='Rename group').click()");
+  await poll(() => evaluate("document.activeElement?.classList.contains('group-name-input')"));
+  assert.equal(await evaluate("document.querySelector('.group-name-input').value"), "Delete test");
+  await evaluate("(()=>{const input=document.querySelector('.group-name-input');input.value='Renamed group';input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));})()");
+  await poll(async () => (await call("GET_STATE")).groups.find(item => item.id === group.id).name === "Renamed group");
+  await ready();
+  await evaluate(`document.querySelector('.tab-group[data-entry-id="${group.id}"]').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:50,clientY:120}));[...document.querySelectorAll('#context-menu button')].find(node=>node.textContent==='Rename group').click()`);
+  await poll(() => evaluate("Boolean(document.querySelector('.group-name-input'))"));
+  await evaluate("(()=>{const input=document.querySelector('.group-name-input');input.value='Cancelled name';input.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));})()");
+  await ready();
+  assert.equal((await call("GET_STATE")).groups.find(item => item.id === group.id).name, "Renamed group");
+  await connection.send("Page.reload", {}, sessionId); await ready();
+  assert.equal(await evaluate("document.querySelector('.group-name').textContent"), "Renamed group");
+  await evaluate(`document.querySelector('.tab-group[data-entry-id="${group.id}"]').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:50,clientY:120}))`);
   await evaluate("document.querySelector('.menu-danger').click()");
   await poll(async () => !(await call("GET_STATE")).groups.some(item => item.id === group.id));
   await ready();
@@ -76,6 +90,6 @@ try {
   await evaluate("document.querySelector('[data-fixture=default]').click()");
   await poll(() => preview("document.querySelectorAll('.tab-card').length===6"));
   assert.deepEqual(connection.events.filter(event => event.method === "Runtime.exceptionThrown"), []);
-  console.log("PASS: red cross deletion (mouse and keyboard), whole-group deletion, saved opening preference, keep/remove behavior, and matching preview controls.");
+  console.log("PASS: red cross deletion (mouse and keyboard), group renaming and cancellation with persistence, whole-group deletion, saved opening preference, keep/remove behavior, and matching preview controls.");
   if (process.argv.includes("--close")) await connection.send("Browser.close");
 } finally { connection?.close(); await new Promise(resolve => server.close(resolve)); }

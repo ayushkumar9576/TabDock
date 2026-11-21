@@ -110,7 +110,7 @@ try {
   await connection.send("Page.reload", {}, sessionId);
   await poll(() => evaluate("document.body.dataset.ready==='true' && !document.body.hasAttribute('aria-busy')"));
   assert.deepEqual((await saved()).groups, persisted, "Reopening retains mixed order and grouping");
-  assert.deepEqual(await context(`${groupSelector(group.id)} .group-header`), ["Open", "Delete group"]);
+  assert.deepEqual(await context(`${groupSelector(group.id)} .group-header`), ["Open", "Rename group", "Delete group"]);
   await evaluate("document.querySelector('#context-menu').hidden=true");
   await connection.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "dark" }] }, sessionId);
   assert.equal(await evaluate("getComputedStyle(document.documentElement).colorScheme"), "light");
@@ -131,14 +131,34 @@ try {
   await evaluate(`chrome.tabs.update(${opened.tabIds[1]},{active:true})`);
   await poll(() => requests.has("/two"), "Deferred page did not load when activated");
   assert.equal(requests.has("/one"), false, "Selecting the second tab must not load the first");
+  // Single tabs join the active native group regardless of their saved location.
+  for (const savedTab of [
+    { groupId: third.groupId, linkId: third.linkId },
+    { groupId: group.id, linkId: first.linkId },
+  ]) {
+    const single = await call("OPEN_LINK", { ...savedTab, windowId: sourceWindow });
+    assert.deepEqual(single.warnings, []);
+    const tab = await evaluate(`chrome.tabs.get(${single.tabIds[0]})`);
+    assert.equal(tab.groupId, opened.nativeGroupId);
+    assert.equal(tab.discarded, true); assert.equal(tab.status, "unloaded"); assert.equal(tab.active, false);
+    assert.equal(await evaluate(`chrome.tabs.query({windowId:${sourceWindow},active:true}).then(tabs=>tabs[0].id)`), opened.tabIds[1]);
+    assert.equal(requests.has("/three"), false); assert.equal(requests.has("/one"), false);
+    await evaluate(`chrome.tabs.remove(${tab.id})`);
+  }
+  const separate = await call("OPEN_GROUP", { groupId: group.id, windowId: sourceWindow });
+  assert.notEqual(separate.nativeGroupId, opened.nativeGroupId);
+  assert.equal((await evaluate(`chrome.tabGroups.get(${separate.nativeGroupId})`)).title, "LeetCode");
+  await evaluate(`chrome.tabs.remove(${JSON.stringify(separate.tabIds)})`);
   const plan = await call("PREPARE_MOVE", { scope: "group", windowId: sourceWindow, nativeGroupId: opened.nativeGroupId });
   assert.deepEqual(plan.groups[0].tabs.map(tab => tab.url), [`${site}/one`, `${site}/two`]);
   const parked = await call("COMMIT_MOVE", { planId: plan.id, choices: { [plan.groups[0].key]: { mode: "new" } } });
   assert.equal(parked.undo.entries.filter(entry => entry.closed).length, 2);
   const undone = await call("UNDO_MOVE", { undoId: parked.undo.id }); assert.match(undone.message, /2 tabs restored/);
+  await evaluate("chrome.tabs.getCurrent().then(tab=>chrome.tabs.update(tab.id,{active:true}))");
   const openedSingle = await call("OPEN_LINK", { groupId: third.groupId, linkId: third.linkId, windowId: sourceWindow });
   assert.equal(openedSingle.tabIds.length, 1); assert.equal(requests.has("/three"), false);
   const singleTab = await evaluate(`chrome.tabs.get(${openedSingle.tabIds[0]})`);
+  assert.equal(singleTab.groupId, -1);
   assert.equal(singleTab.discarded, true); assert.equal(singleTab.status, "unloaded"); assert.equal(singleTab.active, false);
   await evaluate(`chrome.tabs.update(${singleTab.id},{active:true})`); await poll(() => requests.has("/three"));
 
