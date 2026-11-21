@@ -1,0 +1,40 @@
+.lazy-page {
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+}
+
+.lazy-page main {
+    max-width: 600px;
+    text-align: center;
+    padding: 30px;
+}
+
+.mark {
+    display: inline-grid;
+    place-items: center;
+    width: 64px;
+    height: 64px;
+    background: var(--accent-soft);
+    color: var(--accent-text);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
+.mark .icon {
+    width: 32px;
+    height: 32px;
+}
+
+.lazy-page h1 {
+    font-size: 25px;
+    overflow-wrap: anywhere;
+}
+
+.lazy-page p {
+    color: var(--muted);
+}
+
+.lazy-page button {
+    padding: 10px 24px;
+}

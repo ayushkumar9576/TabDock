@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <title>Parked tab · TabDock</title>
+    <link rel="stylesheet" href="../popup/popup.css">
+    <link rel="stylesheet" href="lazy.css">
+</head>
+
+<body class="lazy-page">
+    <main><span class="mark" aria-hidden="true"></span>
+        <h1 id="title">Your tab is ready</h1>
+        <p id="message">This page is waiting in TabDock. It will load when you select this tab.</p><button id="open"
+            class="primary">Load page</button>
+    </main>
+    <script type="module" src="lazy.js"></script>
+</body>
+
+</html>
