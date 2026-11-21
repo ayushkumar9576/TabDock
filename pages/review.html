@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <title>Confirm parking · TabDock</title>
+    <link rel="stylesheet" href="../popup/popup.css">
+</head>
+
+<body class="review-page">
+    <header class="header">
+        <div class="brand"><span class="brand-icon" data-icon="archive" aria-hidden="true"></span>
+            <div>
+                <h1>TabDock</h1>
+                <p>Choose where your browser tabs belong.</p>
+            </div>
+        </div>
+    </header>
+    <main class="review-card">
+        <h2 id="heading">A group with this name exists</h2>
+        <p id="description">Choose a separate copy or merge with an existing saved group. Tabs stay open until you
+            confirm.</p>
+        <form id="review-form">
+            <div id="choices"></div>
+            <p id="warnings"></p>
+            <div class="dialog-actions"><button id="cancel" type="button">Cancel</button><button id="confirm"
+                    class="primary" type="submit">Park tabs</button></div>
+        </form>
+        <p id="status" role="status"></p><button id="undo" hidden>Undo move</button>
+    </main>
+    <script type="module" src="review.js"></script>
+</body>
+
+</html>
