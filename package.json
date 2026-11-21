@@ -1,0 +1,19 @@
+{
+  "name": "tabdock",
+  "version": "1.2.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "preview": "node scripts/preview.mjs",
+    "check": "node scripts/check.mjs",
+    "test": "node --test",
+    "icons": "node scripts/generate-icons.mjs",
+    "check:design": "node scripts/check-design.mjs",
+    "test:browser": "node scripts/browser-smoke.mjs",
+    "test:popup": "node scripts/popup-layout-check.mjs",
+    "test:actions": "node scripts/actions-smoke.mjs",
+    "test:drag": "node scripts/drag-preview-smoke.mjs",
+    "test:capture": "node scripts/capture-smoke.mjs",
+    "vendor:ui": "node scripts/vendor-ui-assets.mjs"
+  }
+}
