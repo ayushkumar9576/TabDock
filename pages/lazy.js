@@ -4,7 +4,7 @@ import { icon } from "../shared/icons.js";
 document.querySelector(".mark").append(icon("archive"));
 const link = parseLazyUrl(location.href, chrome.runtime.getURL("pages/lazy.html"));
 if (link) {
-  document.title = link.title;
+  document.title = `${new URLSearchParams(location.hash.slice(1)).get("star") === "1" ? "★ " : ""}${link.title}`;
   document.querySelector("#title").textContent = link.title;
   const icon = document.createElement("link");
   icon.rel = "icon"; icon.href = faviconUrl(link.url); document.head.append(icon);

@@ -1,4 +1,5 @@
 import { savableTabUrl, tabSnapshot } from "../shared/model.js";
+import { cleanBrowserTabs, cleanBrowserGroup } from "./indicators.js";
 
 export async function captureBrowserGroup(input = {}) {
   let groupId = input.nativeGroupId;
@@ -12,11 +13,11 @@ export async function captureBrowserGroup(input = {}) {
     groupId = selected?.groupId;
   }
   if (!Number.isInteger(groupId) || groupId < 0) throw new Error("The selected tab is not in a browser group.");
-  const group = await chrome.tabGroups.get(groupId);
+  const group = await cleanBrowserGroup(await chrome.tabGroups.get(groupId));
   if (input.windowId !== undefined && group.windowId !== input.windowId) throw new Error("This group belongs to another browser window.");
   if ((await chrome.windows.get(group.windowId)).type !== "normal") throw new Error("Choose a group from a normal browser window.");
   // Query membership by group ID, including members before the clicked tab.
-  const tabs = (await chrome.tabs.query({ windowId: group.windowId, groupId }))
+  const tabs = (await cleanBrowserTabs(await chrome.tabs.query({ windowId: group.windowId, groupId })))
     .filter(tab => tab.groupId === groupId).sort((a, b) => a.index - b.index);
   if (!tabs.length) throw new Error("This browser group no longer has any tabs.");
   const snapshots = tabs.map(tab => tabSnapshot(tab, chrome.runtime.getURL("pages/lazy.html")));

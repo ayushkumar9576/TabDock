@@ -2,11 +2,12 @@ import { makeGroup, makeLink, findGroup, matchingGroups, id, savableTabUrl, isNe
 import { writeState } from "../shared/storage.js";
 import { LAZY_BASE, createSavedTab, resolveWindow } from "./open.js";
 import { captureBrowserGroup } from "./groups.js";
+import { cleanBrowserTabs, cleanBrowserGroup } from "./indicators.js";
 
 async function windowTabs(windowId) {
   const window = await chrome.windows.get(windowId);
   if (window.type !== "normal") throw new Error("Choose tabs from a normal browser window.");
-  return (await chrome.tabs.query({ windowId })).sort((a, b) => a.index - b.index);
+  return (await cleanBrowserTabs(await chrome.tabs.query({ windowId }))).sort((a, b) => a.index - b.index);
 }
 
 export async function prepareMove(state, input) {
@@ -49,7 +50,7 @@ export async function prepareMove(state, input) {
     if (!byNative.has(key)) {
       let group;
       if (native) {
-        const original = await chrome.tabGroups.get(tab.groupId);
+        const original = await cleanBrowserGroup(await chrome.tabGroups.get(tab.groupId));
         group = {
           key: id(), name: original.title || "Untitled group", color: original.color,
           collapsed: original.collapsed, fromNativeGroup: true,
@@ -73,7 +74,7 @@ export async function prepareMove(state, input) {
   const nativeMetadata = {};
   for (const tab of supported.filter(tab => tab.groupId >= 0)) {
     if (!nativeMetadata[tab.groupId]) {
-      const group = await chrome.tabGroups.get(tab.groupId);
+      const group = await cleanBrowserGroup(await chrome.tabGroups.get(tab.groupId));
       nativeMetadata[tab.groupId] = { id: group.id, title: group.title, color: group.color, collapsed: group.collapsed, windowId: group.windowId };
     }
   }
