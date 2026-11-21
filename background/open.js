@@ -42,7 +42,7 @@ export async function createSavedTab(link, { windowId, deferred = false, active 
   return { tab, warning };
 }
 
-function placeholderReady(tabId) {
+export function placeholderReady(tabId) {
   return new Promise(resolve => {
     let timer;
     const finish = () => { clearTimeout(timer); chrome.tabs.onUpdated.removeListener(listener); resolve(); };
@@ -83,13 +83,24 @@ export async function openGroup(group, options = {}) {
 export async function openSavedLink(state, groupId, linkId, options = {}) {
   const { group, link } = findLink(state, groupId, linkId);
   const windowId = await resolveWindow(options.windowId);
+  // Capture the active tab's group before creating or discarding the placeholder.
+  const [activeTab] = await chrome.tabs.query({ windowId, active: true });
   const result = await createSavedTab(link, { windowId, deferred: true, active: false });
+  const warnings = result.warning ? [result.warning] : [];
+  if (Number.isInteger(activeTab?.groupId) && activeTab.groupId >= 0) {
+    if (result.tab.pinned) warnings.push("Pinned tabs were restored in the pinned area, as required by Chromium.");
+    else {
+      try {
+        await chrome.tabs.group({ tabIds: [result.tab.id], groupId: activeTab.groupId });
+      } catch (error) { warnings.push(`Tab opened, but adding it to the current browser group failed: ${error.message}`); }
+    }
+  }
   if (options.remove ?? state.settings?.removeAfterOpen) {
     group.links = group.links.filter(item => item.id !== link.id);
     cleanLooseTabs(state);
     await writeState(state);
   }
-  return { tabIds: [result.tab.id], openedLinkIds: [link.id], warnings: result.warning ? [result.warning] : [] };
+  return { tabIds: [result.tab.id], openedLinkIds: [link.id], warnings };
 }
 
 export async function openSavedGroup(state, groupId, options = {}) {

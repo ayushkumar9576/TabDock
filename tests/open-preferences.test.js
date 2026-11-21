@@ -82,6 +82,78 @@ test("single-tab opening creates an unloaded background placeholder and preserve
   assert.ok(!mock.log.some(item => item[0] === "update" && item[2]?.active));
 });
 
+for (const loose of [false, true]) {
+  test(`a single ${loose ? "standalone" : "grouped saved"} tab joins the active browser group`, async () => {
+    const nativeGroup = { id: 7, title: "Current work", color: "purple", collapsed: false, windowId: 1 };
+    const mock = mockChrome({ tabs: [tab(1, { groupId: 7 }), tab(2, { groupId: 7 })], groups: [nativeGroup] });
+    const { state, group } = library({ loose, count: 1 }); const before = structuredClone(state.groups);
+    const opened = await openSavedLink(state, group.id, group.links[0].id, { windowId: 1 });
+    const created = mock.live.find(tab => tab.id === opened.tabIds[0]);
+    assert.equal(created.groupId, 7);
+    assert.equal(created.discarded, true); assert.equal(created.active, false);
+    assert.ok(created.url.startsWith(`${LAZY_BASE}#`));
+    assert.equal(mock.live.find(tab => tab.active).id, 1);
+    assert.deepEqual(mock.native.get(7), nativeGroup); assert.equal(mock.native.size, 1);
+    assert.deepEqual(state.groups, before); assert.deepEqual(opened.warnings, []);
+  });
+
+  test(`a single ${loose ? "standalone" : "grouped saved"} tab stays individual outside a browser group`, async () => {
+    const mock = mockChrome({ tabs: [tab(1), tab(2, { groupId: 7 })], groups: [{ id: 7, title: "Other", color: "red", windowId: 1 }] });
+    const { state, group } = library({ loose, count: 1 });
+    const opened = await openSavedLink(state, group.id, group.links[0].id, { windowId: 1 });
+    assert.equal(mock.live.find(tab => tab.id === opened.tabIds[0]).groupId, -1);
+    assert.ok(!mock.log.some(item => item[0] === "group"));
+  });
+}
+
+test("single-tab grouping uses the active tab in the destination window", async () => {
+  const mock = mockChrome({ tabs: [tab(1), tab(2, { windowId: 2, active: true, groupId: 7 })] });
+  const { state, group } = library({ count: 1 });
+  const opened = await openSavedLink(state, group.id, group.links[0].id, { windowId: 1 });
+  assert.equal(mock.live.find(tab => tab.id === opened.tabIds[0]).groupId, -1);
+  assert.ok(!mock.log.some(item => item[0] === "group"));
+});
+
+test("single-tab grouping uses Brave's replacement ID after discarding", async () => {
+  const mock = mockChrome({ tabs: [tab(1, { groupId: 7 })], groups: [{ id: 7, title: "Current", windowId: 1 }], discardRemaps: true });
+  const { state, group } = library({ count: 1 });
+  const opened = await openSavedLink(state, group.id, group.links[0].id, { windowId: 1 });
+  assert.equal(mock.live.find(tab => tab.id === opened.tabIds[0]).groupId, 7);
+  assert.deepEqual(mock.log.find(item => item[0] === "group")[1], { tabIds: opened.tabIds, groupId: 7 });
+});
+
+test("a disappearing active group reports a warning while leaving the opened tab available", async () => {
+  const mock = mockChrome({ tabs: [tab(1, { groupId: 7 })] });
+  mock.chrome.tabs.group = async () => { throw new Error("Group no longer exists"); };
+  const { state, group } = library({ count: 1 });
+  const opened = await openSavedLink(state, group.id, group.links[0].id, { windowId: 1 });
+  assert.equal(mock.live.find(tab => tab.id === opened.tabIds[0]).groupId, -1);
+  assert.match(opened.warnings[0], /current browser group failed: Group no longer exists/);
+  assert.equal(group.links.length, 1);
+});
+
+test("pinned single tabs retain their pinned position when the active tab is grouped", async () => {
+  const mock = mockChrome({ tabs: [tab(1, { groupId: 7 })] });
+  const { state, group } = library({ count: 1 }); group.links[0].pinned = true;
+  const opened = await openSavedLink(state, group.id, group.links[0].id, { windowId: 1 });
+  const created = mock.live.find(tab => tab.id === opened.tabIds[0]);
+  assert.equal(created.pinned, true); assert.equal(created.groupId, -1);
+  assert.match(opened.warnings[0], /Pinned tabs/);
+  assert.ok(!mock.log.some(item => item[0] === "group"));
+});
+
+test("opening a whole saved group creates a separate group even while inside a browser group", async () => {
+  const current = { id: 7, title: "Current", color: "red", collapsed: false, windowId: 1 };
+  const mock = mockChrome({ tabs: [tab(1, { groupId: 7 })], groups: [current] });
+  const { state, group } = library();
+  const opened = await openSavedGroup(state, group.id, { windowId: 1 });
+  assert.notEqual(opened.nativeGroupId, 7); assert.equal(mock.native.size, 2);
+  assert.deepEqual(mock.native.get(7), current);
+  assert.equal(mock.native.get(opened.nativeGroupId).title, "Reading");
+  assert.ok(opened.tabIds.every(id => mock.live.find(tab => tab.id === id).groupId === opened.nativeGroupId));
+  assert.equal(mock.live.find(tab => tab.active).id, 1);
+});
+
 test("a discard failure reports a warning and still never creates the target website", async () => {
   const mock = mockChrome({ tabs: [tab(1)], failDiscard: true }); const { state, group } = library({ count: 1 });
   const opened = await openSavedLink(state, group.id, group.links[0].id, { windowId: 1 });
