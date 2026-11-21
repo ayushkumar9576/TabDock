@@ -14,6 +14,7 @@
     "test:actions": "node scripts/actions-smoke.mjs",
     "test:drag": "node scripts/drag-preview-smoke.mjs",
     "test:capture": "node scripts/capture-smoke.mjs",
+    "test:stars": "node scripts/stars-smoke.mjs",
     "vendor:ui": "node scripts/vendor-ui-assets.mjs"
   }
 }

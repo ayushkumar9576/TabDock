@@ -5,6 +5,8 @@ import { fetchPageTitle, linkText } from "./titles.js";
 import { openSavedGroup, openSavedLink, activateLazy, LAZY_BASE } from "./open.js";
 import { prepareMove, commitMove, undoMove } from "./moves.js";
 import { savePage, saveBrowserGroup } from "./save.js";
+import { getStars, setTabStar, setGroupStar, getTabStar, refreshGroupIndicator, enforceStars, enforceStarredTab, removeTabStar, removeGroupStar, replaceTabStar, restoreStars } from "./stars.js";
+import { requestIndicatorAccess, rememberTabTitle, cleanBrowserTabs, registerIndicators } from "./indicators.js";
 
 async function notice(message) {
   await chrome.storage.local.set({ tabHarborNotice: message });
@@ -15,6 +17,19 @@ function report(error) { console.error("TabDock:", error); return notice(error.m
 
 async function handle(message, sender) {
   if (sender.id !== chrome.runtime.id) throw new Error("Unauthorized message.");
+  if (message.type === "GET_TAB_STAR") {
+    if (!sender.tab) throw new Error("This action requires a browser tab.");
+    return getTabStar(sender.tab.id);
+  }
+  if (message.type === "STAR_TITLE") {
+    if (!sender.tab || typeof message.title !== "string") throw new Error("Invalid tab title.");
+    return rememberTabTitle(sender.tab.id, message.title.slice(0, 1000));
+  }
+  if (message.type === "GET_STARS") return getStars();
+  if (["STAR_TAB", "STAR_BROWSER_GROUP"].includes(message.type)) {
+    if (typeof message.starred !== "boolean") throw new Error("Choose whether to star or unstar.");
+    return message.type === "STAR_TAB" ? setTabStar(message.tabId, message.starred) : setGroupStar(message.tabId, message.starred);
+  }
   if (message.type === "ACTIVATE_LAZY") {
     if (sender.tab && sender.tab.id !== message.tabId) throw new Error("A placeholder can only activate its own tab.");
     return activateLazy(message.tabId);
@@ -121,7 +136,10 @@ async function handle(message, sender) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  exclusive(() => handle(message, sender)).then(data => sendResponse({ ok: true, data }), error => sendResponse({ ok: false, error: error.message }));
+  // Star management has its own queue so a long saved-group restore cannot delay discarding.
+  const operation = ["GET_STARS", "GET_TAB_STAR", "STAR_TITLE", "STAR_TAB", "STAR_BROWSER_GROUP"].includes(message.type)
+    ? handle(message, sender) : exclusive(() => handle(message, sender));
+  operation.then(data => sendResponse({ ok: true, data }), error => sendResponse({ ok: false, error: error.message }));
   return true;
 });
 
@@ -141,11 +159,18 @@ async function backgroundMove(input) {
   } else await notice(result.notice);
 }
 
-chrome.contextMenus.onClicked.addListener((info, tab) => {
-  (async () => {
+export async function handleContextMenu(info, tab) {
     if (!tab?.id) tab = (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
     if (!tab?.id) throw new Error("No browser tab is available.");
     const menu = String(info.menuItemId);
+    if (["star-tab", "unstar-tab", "star-native", "unstar-native"].includes(menu)) {
+      const starred = menu.startsWith("star-");
+      if (menu.endsWith("native") && (!Number.isInteger(tab.groupId) || tab.groupId < 0)) throw new Error("Choose a tab inside a browser group.");
+      const access = starred ? await requestIndicatorAccess() : true;
+      const result = menu.endsWith("native") ? await setGroupStar(tab.id, starred) : await setTabStar(tab.id, starred);
+      if (!access) result.warnings.push("Allow optional website access to show ★ on loaded webpage tabs.");
+      await notice(result.message + (result.warnings.length ? ` ${result.warnings.join(" ")}` : "")); return;
+    }
     if (menu === "save-native") {
       const result = await exclusive(async () => {
         const state = await readState();
@@ -166,7 +191,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
     if (!["link", "page"].includes(kind)) return;
     const data = kind === "link"
       ? { url: info.linkUrl, title: await linkText(info, tab) || info.selectionText || "", pinned: false }
-      : tabSnapshot(tab, LAZY_BASE);
+      : tabSnapshot((await cleanBrowserTabs([tab]))[0], LAZY_BASE);
     if (!(kind === "link" ? savableUrl(data.url) : savableTabUrl(data.url))) throw new Error("This page cannot be saved. Web pages, New Tab, and blank tabs are supported.");
     const saved = await exclusive(async () => {
       const state = await readState(); const result = await savePage(state, { ...data, groupId });
@@ -183,8 +208,8 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
         if (link) { link.title = title; await writeState(state); }
       });
     }
-  })().catch(report);
-});
+}
+chrome.contextMenus.onClicked.addListener((info, tab) => handleContextMenu(info, tab).catch(report));
 
 chrome.commands.onCommand.addListener(command => {
   (async () => {
@@ -193,9 +218,25 @@ chrome.commands.onCommand.addListener(command => {
   })().catch(report);
 });
 
-chrome.tabs.onActivated.addListener(({ tabId }) => { exclusive(() => activateLazy(tabId)).catch(report); });
-chrome.tabs.onReplaced.addListener(addedTabId => { exclusive(() => activateLazy(addedTabId)).catch(report); });
+function starTask(operation) {
+  operation.then(result => { if (result?.warnings?.length) return notice(result.warnings.join(" ")); }).catch(report);
+}
+chrome.tabs.onActivated.addListener(({ tabId, windowId }) => {
+  starTask(enforceStars(windowId));
+  exclusive(() => activateLazy(tabId)).catch(report);
+});
+chrome.tabs.onReplaced.addListener((addedTabId, removedTabId) => {
+  replaceTabStar(addedTabId, removedTabId).then(() => starTask(enforceStarredTab(addedTabId))).catch(report);
+  exclusive(() => activateLazy(addedTabId)).catch(report);
+});
+chrome.tabs.onCreated.addListener(tab => { starTask(enforceStarredTab(tab.id)); });
+chrome.tabs.onAttached.addListener(tabId => { starTask(enforceStarredTab(tabId)); });
+chrome.tabs.onRemoved.addListener(tabId => { removeTabStar(tabId).catch(report); });
+chrome.tabGroups.onRemoved.addListener(group => { removeGroupStar(group.id).catch(report); });
+chrome.tabGroups.onUpdated.addListener(group => { refreshGroupIndicator(group.id).catch(report); });
+chrome.permissions.onAdded.addListener(() => { registerIndicators().catch(report); });
 chrome.tabs.onUpdated.addListener((tabId, changes, tab) => {
+  if (changes.groupId !== undefined || changes.url || changes.status || changes.discarded === false) starTask(enforceStarredTab(tabId));
   if (tab.active && (changes.status === "complete" || changes.url)) exclusive(() => activateLazy(tabId)).catch(report);
 });
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -209,3 +250,4 @@ chrome.runtime.onStartup.addListener(() => {
   }).catch(report);
 });
 exclusive(async () => rebuildMenus(await readState())).catch(report);
+starTask(restoreStars());

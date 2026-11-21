@@ -1,6 +1,7 @@
 export function mockChrome({ tabs = [], groups = [], failRemove = [], failCreate = false, failCreateUrls = [], failStorage = false, failDiscard = false, discardRemaps = false } = {}) {
   const log = [];
   const data = {};
+  const sessionData = {};
   const live = structuredClone(tabs);
   const native = new Map(groups.map(group => [group.id, structuredClone(group)]));
   let nextTab = Math.max(100, ...live.map(tab => tab.id)) + 1;
@@ -11,6 +12,10 @@ export function mockChrome({ tabs = [], groups = [], failRemove = [], failCreate
   const chrome = {
     runtime: { id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", getURL: path => `chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/${path}` },
     storage: {
+      session: {
+        get: async key => ({ [key]: structuredClone(sessionData[key]) }),
+        set: async value => { log.push(["session-store"]); if (failStorage) throw new Error("Storage quota exceeded"); Object.assign(sessionData, structuredClone(value)); },
+      },
       local: {
         get: async key => ({ [key]: structuredClone(data[key]) }),
         set: async value => { log.push(["store"]); if (failStorage) throw new Error("Storage quota exceeded"); Object.assign(data, structuredClone(value)); },
@@ -66,7 +71,7 @@ export function mockChrome({ tabs = [], groups = [], failRemove = [], failCreate
     },
   };
   globalThis.chrome = chrome;
-  return { chrome, live, native, log, data };
+  return { chrome, live, native, log, data, sessionData };
 }
 
 export function tab(id, overrides = {}) {
