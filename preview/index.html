@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TabDock · Frontend preview</title>
+  <link rel="stylesheet" href="preview.css">
+</head>
+
+<body>
+  <main>
+    <div class="intro">
+      <h1>Frontend preview</h1>
+      <p>Edit the popup files. Changes refresh the preview automatically.</p>
+    </div>
+    <div class="preview-frame"><iframe id="popup" src="../popup/popup.html" title="TabDock extension preview"
+        width="440" height="580"></iframe></div>
+    <div class="controls" aria-label="Sample data"><button data-fixture="default">Reset sample tabs</button><button
+        data-fixture="long">Long list</button><button data-fixture="empty">Empty state</button></div>
+    <p id="action" role="status">Preview changes are saved separately. Open actions are simulated.</p>
+    <p class="files">Edit <code>popup/popup.css</code> for styling, <code>popup/popup.js</code> for interactions, and
+      <code>popup/popup.html</code> for the page structure.</p>
+  </main>
+  <script type="module" src="preview.js"></script>
+</body>
+
+</html>

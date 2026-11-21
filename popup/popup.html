@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en" class="popup-root">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>TabDock</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+
+<body class="popup-page">
+  <main id="workspace" aria-label="Saved tabs" tabindex="-1">
+    <div id="tabs" class="tab-list" role="list" aria-label="Tabs and groups"></div>
+    <div id="empty" class="empty" hidden>
+      <p>No saved tabs yet.</p><span>Right-click a browser page to save it here.</span>
+    </div>
+  </main>
+  <button id="settings-toggle" class="settings-toggle" aria-haspopup="dialog"
+    aria-controls="settings-dialog">Settings</button>
+  <dialog id="settings-dialog" class="settings-dialog" aria-labelledby="settings-title">
+    <div class="settings-heading">
+      <h2 id="settings-title">Settings</h2><button id="settings-close" class="settings-close"
+        aria-label="Close settings">×</button>
+    </div>
+    <label class="settings-choice"><input id="remove-after-open" type="checkbox"><span>Remove tabs after
+        opening</span></label>
+    <p>Applies to single tabs and groups. Turn off to keep them saved.</p>
+    <label class="settings-choice"><input id="include-new-tabs" type="checkbox"><span>Include New Tab pages in saved
+        groups</span></label>
+    <p>When off, empty New Tab and blank pages are closed and excluded when adding or moving a browser group.</p>
+  </dialog>
+  <div id="context-menu" class="context-menu" role="menu" aria-label="Tab actions" hidden></div>
+  <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true" hidden>
+    <span id="toast-text"></span><button id="undo" hidden>Undo</button><button id="toast-close" class="toast-close"
+      aria-label="Dismiss notification">×</button>
+  </div>
+  <script type="module" src="bootstrap.js"></script>
+</body>
+
+</html>
