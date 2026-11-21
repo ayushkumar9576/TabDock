@@ -12,6 +12,12 @@ test("context menus offer standalone saving, hide storage buckets, and rebuild n
   };
   const state = initialState(); await rebuildMenus(state, true);
   assert.equal(menus.get("link:default").parentId, undefined);
+  assert.deepEqual([...menus.values()].filter(item => !item.parentId && item.contexts.includes("page")).map(item => item.title), ["This tab", "This group", "Window"]);
+  assert.equal(menus.get("page:default").parentId, "tab-actions");
+  assert.equal(menus.get("star-tab").parentId, "tab-actions");
+  assert.equal(menus.get("star-native").parentId, "group-actions");
+  assert.equal(menus.get("save-native").parentId, "group-actions");
+  assert.equal(menus.get("park-window").parentId, "window-actions");
   state.groups.push(makeGroup({ name: "First" })); await rebuildMenus(state);
   assert.equal(menus.get(`link:${state.groups[0].id}`).parentId, "link-root");
   assert.equal(menus.get("link:default").title, "As an individual tab");
@@ -19,6 +25,9 @@ test("context menus offer standalone saving, hide storage buckets, and rebuild n
   assert.deepEqual(menus.get("park:default").contexts, ["page", "action", "tab"]);
   assert.ok(menus.has("save-native")); assert.ok(menus.has("park-native"));
   assert.deepEqual(menus.get("save-native").contexts, ["page", "action", "tab"]);
+  for (const id of ["star-tab", "unstar-tab", "star-native", "unstar-native"]) {
+    assert.ok(menus.has(id)); assert.deepEqual(menus.get(id).contexts, ["page", "action", "tab"]);
+  }
   assert.ok(!menus.has("tabdock-tab-context-probe"));
   assert.ok(menus.has(`page:${state.groups[0].id}`)); assert.ok(menus.has(`park:${state.groups[0].id}`));
   state.groups.push(makeGroup({ name: "Second" }, 1)); await rebuildMenus(state);
@@ -58,6 +67,8 @@ test("browsers without tab-header contexts still get page and toolbar capture me
   await fallback.rebuildMenus(initialState(), true);
   assert.deepEqual(menus.get("page:default").contexts, ["page", "action"]);
   assert.ok(menus.has("save-native")); assert.ok(menus.has("park-native"));
+  assert.deepEqual(menus.get("star-tab").contexts, ["page", "action"]);
+  assert.deepEqual(menus.get("star-native").contexts, ["page", "action"]);
 });
 test("title fetching rejects non-HTML responses and does not read titles beyond its limit", async () => {
   globalThis.chrome = { permissions: { contains: async () => true } };
