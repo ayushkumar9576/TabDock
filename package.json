@@ -15,6 +15,7 @@
     "test:drag": "node scripts/drag-preview-smoke.mjs",
     "test:capture": "node scripts/capture-smoke.mjs",
     "test:stars": "node scripts/stars-smoke.mjs",
+    "test:memory": "node scripts/memory-audit.mjs",
     "vendor:ui": "node scripts/vendor-ui-assets.mjs"
   }
 }

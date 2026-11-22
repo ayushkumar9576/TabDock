@@ -1,6 +1,6 @@
 // Pointer dragging keeps a live insertion gap, animates surrounding cards, and
 // commits once on release. No native drag image or visible grip is needed.
-export function installDragging({ workspace, list, onDrop, onCancel, onStart }) {
+export function installDragging({ workspace, list, onDrop, onCancel, onStart, onGroupPreview }) {
   let pending, drag, frame;
   const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
   const visible = node => node && !node.classList.contains("drag-origin");
@@ -62,6 +62,7 @@ export function installDragging({ workspace, list, onDrop, onCancel, onStart }) 
   function previewGroup(current, target = null) {
     for (const [group, original] of current.groupStates) {
       const previewing = group === target;
+      if (original.hidden && previewing !== (group === current.previewGroup)) onGroupPreview?.(group, previewing);
       group.classList.toggle("drop-target", previewing);
       original.links.hidden = previewing ? false : original.hidden;
       if (original.toggle) {

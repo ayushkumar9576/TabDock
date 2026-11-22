@@ -48,14 +48,18 @@ try {
   const groups = (await call("GET_STATE")).groups;
   const a = groups.find(group => group.name === "Collapsed A"), b = groups.find(group => group.name === "Expanded B"), c = groups.find(group => group.name === "Collapsed C");
   const existing = await call("SAVE_PAGE", { groupId: b.id, url: "https://example.com/existing", title: "Existing tab" });
+  const hiddenLink = await call("SAVE_PAGE", { groupId: a.id, url: "https://example.com/hidden", title: "Hidden tab" });
   await ready(); await pause(230);
   const original = (await call("GET_STATE")).groups, originalStyles = new Map(await Promise.all([a, b, c].map(async group => [group.id, await style(group.id)])));
+  assert.equal(await evaluate(`Boolean(document.querySelector(${JSON.stringify(linkSelector(hiddenLink.linkId))}))`), false, "Collapsed tabs should not occupy DOM memory");
   await begin(source.linkId); await hover(a.id);
   assert.equal(await hidden(a.id), false); assert.equal(await expanded(a.id), "true");
+  assert.equal(await evaluate(`Boolean(document.querySelector(${JSON.stringify(linkSelector(hiddenLink.linkId))}))`), true, "Drag preview should mount hidden members on demand");
   assert.deepEqual(await style(a.id), originalStyles.get(a.id), "Hover must preserve the group's background, border and text styling");
   assert.equal((await call("GET_STATE")).groups.find(group => group.id === a.id).collapsed, true);
   await move(18, 220);
   assert.equal(await hidden(a.id), true, "Leaving without releasing must immediately restore collapse");
+  assert.equal(await evaluate(`Boolean(document.querySelector(${JSON.stringify(linkSelector(hiddenLink.linkId))}))`), false, "Leaving the group should release preview rows");
   assert.equal(await expanded(a.id), "false");
   await hover(b.id); await move(18, 220);
   assert.equal(await hidden(b.id), false, "Originally expanded groups must remain expanded");
