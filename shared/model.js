@@ -60,7 +60,7 @@ export function makeGroup(input = {}, order = 0) {
 }
 
 export function initialState() {
-  return { version: 1, groups: [], pendingMoves: [], undo: [], settings: { removeAfterOpen: false, includeNewTabs: true } };
+  return { version: 1, groups: [], pendingMoves: [], undo: [], settings: { removeAfterOpen: false, includeNewTabs: true, starAllTabs: false } };
 }
 
 export function sortGroups(groups) { return [...groups].sort((a, b) => a.order - b.order); }

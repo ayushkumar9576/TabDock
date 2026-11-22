@@ -68,7 +68,7 @@ test("explicit keep overrides the global remove setting", async () => {
 test("older saved libraries default to keep and persisted remove preferences survive reads", async () => {
   const mock = mockChrome(); const { state } = library(); delete state.settings;
   mock.data.tabHarbor = structuredClone(state);
-  assert.deepEqual((await readState()).settings, { removeAfterOpen: false, includeNewTabs: true });
+  assert.deepEqual((await readState()).settings, { removeAfterOpen: false, includeNewTabs: true, starAllTabs: false });
   mock.data.tabHarbor.settings = { removeAfterOpen: true };
   assert.equal((await readState()).settings.removeAfterOpen, true);
 });

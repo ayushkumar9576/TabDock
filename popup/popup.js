@@ -39,7 +39,7 @@ function preview(link) {
   const hash = [...host].reduce((sum, character) => sum + character.charCodeAt(0), 0);
   node.style.setProperty("--preview-bg", colors[hash % colors.length]);
   const fallback = () => {
-    const favicon = el("img", "preview-favicon"); favicon.alt = ""; favicon.draggable = false; favicon.src = faviconUrl(link.url, 32);
+    const favicon = el("img", "preview-favicon"); favicon.alt = ""; favicon.draggable = false; favicon.loading = "lazy"; favicon.src = faviconUrl(link.url, 32);
     favicon.addEventListener("error", () => favicon.replaceWith(el("span", "preview-letter", host[0]?.toUpperCase() || "T")), { once: true });
     node.replaceChildren(favicon);
   };
@@ -195,7 +195,9 @@ function renderGroup(group) {
     if (event.altKey && ["ArrowUp", "ArrowDown"].includes(event.key)) { event.preventDefault(); keyboardMove(group, null, event.key === "ArrowUp" ? -1 : 1); }
   });
   const links = el("div", "group-links"); links.id = `group-${group.id}`; links.hidden = Boolean(group.collapsed);
-  links.setAttribute("role", "list"); links.setAttribute("aria-label", `${group.name} tabs`); links.append(...group.links.map(link => renderTab(group, link)));
+  links.dataset.lazy = String(Boolean(group.collapsed));
+  links.setAttribute("role", "list"); links.setAttribute("aria-label", `${group.name} tabs`);
+  if (!group.collapsed) links.append(...group.links.map(link => renderTab(group, link)));
   if (!group.links.length) links.append(el("div", "group-empty", "Drop a tab here"));
   card.append(header, links); card.addEventListener("contextmenu", event => showMenu(event, group)); return card;
 }
@@ -208,6 +210,7 @@ function render() {
   $("#tabs").replaceChildren(...nodes); $("#empty").hidden = nodes.length > 0; document.body.dataset.ready = "true";
   $("#remove-after-open").checked = state.settings?.removeAfterOpen === true;
   $("#include-new-tabs").checked = state.settings?.includeNewTabs !== false;
+  $("#star-all-tabs").checked = state.settings?.starAllTabs === true;
   if (focusKey) [...document.querySelectorAll("[data-focus-key]")].find(node => node.dataset.focusKey === focusKey)?.focus({ preventScroll: true });
   if (renameId) {
     const group = groups.find(item => item.id === renameId), header = [...document.querySelectorAll(".group-header")].find(node => node.dataset.sourceId === renameId);
@@ -236,6 +239,13 @@ function keyboardMove(group, link, direction) {
 installDragging({
   workspace: $("#workspace"), list: $("#tabs"),
   onStart() { dragging = true; hideMenu(); },
+  onGroupPreview(card, expanded) {
+    const links = card.querySelector(".group-links");
+    if (links.dataset.lazy !== "true") return;
+    const group = state.groups.find(group => group.id === card.dataset.entryId);
+    links.replaceChildren(...(expanded && group ? group.links.map(link => renderTab(group, link)) : []));
+    if (expanded && !group?.links.length) links.append(el("div", "group-empty", "Drop a tab here"));
+  },
   onCancel() { dragging = false; render(); if (needsRefresh) { needsRefresh = false; run(refreshState); } },
   onDrop(payload) {
     dragging = false; needsRefresh = false;
@@ -270,12 +280,25 @@ $("#settings-dialog").addEventListener("click", event => {
 });
 function changeSetting(key, event) {
   const input = event.currentTarget;
+  if (busy) { render(); return; }
+  const checked = input.checked;
+  // Request title-indicator access directly from the checkbox gesture.
+  const access = key === "starAllTabs" && checked && chrome.permissions?.request
+    ? chrome.permissions.request({ origins: ["http://*/*", "https://*/*"] }) : Promise.resolve(true);
   run(async () => {
     input.disabled = true;
-    try { await request("UPDATE_SETTINGS", { [key]: input.checked }); await refreshState(); }
+    try {
+      const granted = await access;
+      const result = await request("UPDATE_SETTINGS", { [key]: checked });
+      await refreshState();
+      const warnings = result?.warnings || [];
+      if (!granted) warnings.push("Allow optional website access to show ★ on loaded webpage tabs. Automatic discarding is enabled.");
+      if (warnings.length) notify(warnings.join(" "));
+    }
     finally { input.disabled = false; }
   });
 }
+$("#star-all-tabs").addEventListener("change", event => changeSetting("starAllTabs", event));
 $("#remove-after-open").addEventListener("change", event => changeSetting("removeAfterOpen", event));
 $("#include-new-tabs").addEventListener("change", event => changeSetting("includeNewTabs", event));
 $("#undo").addEventListener("click", () => run(async () => {

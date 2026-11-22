@@ -21,7 +21,7 @@ test("right-click actions and browser events route star behavior through the wor
   chrome.commands = { onCommand: event() };
   chrome.action = { setBadgeText: async () => { }, setBadgeBackgroundColor: async () => { } };
   chrome.contextMenus = { onClicked: event(), create: (properties, callback) => callback(), removeAll: async () => { }, remove: async () => { } };
-  for (const name of ["onActivated", "onReplaced", "onCreated", "onAttached", "onRemoved"]) chrome.tabs[name] = event();
+  for (const name of ["onActivated", "onReplaced", "onCreated", "onAttached", "onMoved", "onRemoved"]) chrome.tabs[name] = event();
   chrome.tabGroups.onRemoved = event();
   chrome.tabGroups.onUpdated = event();
   chrome.permissions = { onAdded: event() };
@@ -29,6 +29,7 @@ test("right-click actions and browser events route star behavior through the wor
   const { getStars } = await import("../background/stars.js");
 
   await chrome.contextMenus.onClicked.dispatch({ menuItemId: "star-tab" }, mock.live[0]);
+  assert.equal(chrome.tabs.onUpdated.hasListeners(), true, "Stars need navigation and membership events");
   assert.deepEqual((await getStars()).tabIds, [1]); assert.equal(mock.live[0].discarded, false);
   await chrome.tabs.update(3, { active: true });
   await chrome.tabs.onActivated.dispatch({ tabId: 3, windowId: 1 }); await getStars();
@@ -41,4 +42,27 @@ test("right-click actions and browser events route star behavior through the wor
   await chrome.contextMenus.onClicked.dispatch({ menuItemId: "unstar-tab" }, mock.live[0]);
   assert.deepEqual((await getStars()).tabIds, []);
   assert.deepEqual(mock.data.tabHarbor.groups, []);
+
+  const send = message => new Promise(resolve => chrome.runtime.onMessage.dispatch(message, { id: chrome.runtime.id }, resolve));
+  assert.equal((await send({ type: "UPDATE_SETTINGS", starAllTabs: "yes" })).ok, false);
+  assert.equal(mock.data.tabHarbor.settings.starAllTabs, false);
+  for (const tab of mock.live) tab.discarded = false;
+  const enabled = await send({ type: "UPDATE_SETTINGS", starAllTabs: true });
+  assert.equal(enabled.ok, true); assert.deepEqual(enabled.data.warnings, []);
+  assert.equal(mock.data.tabHarbor.settings.starAllTabs, true);
+  assert.deepEqual(mock.live.map(tab => tab.discarded), [true, true, false]);
+  const created = await chrome.tabs.create({ url: "https://example.com/new", active: false });
+  await chrome.tabs.onCreated.dispatch(created); await getStars();
+  assert.equal(mock.live.find(tab => tab.id === created.id).discarded, true);
+  await chrome.tabs.update(1, { active: true, discarded: false });
+  await chrome.tabs.onActivated.dispatch({ tabId: 1, windowId: 1 }); await getStars();
+  assert.equal(mock.live.find(tab => tab.id === 3).discarded, true);
+  assert.equal(mock.live.find(tab => tab.id === 1).discarded, false);
+  assert.equal((await send({ type: "GET_STATE" })).data.settings.starAllTabs, true);
+  assert.equal((await send({ type: "UPDATE_SETTINGS", starAllTabs: false })).ok, true);
+  for (const tab of mock.live) tab.discarded = false;
+  await chrome.tabs.onActivated.dispatch({ tabId: 1, windowId: 1 }); await getStars();
+  assert.ok(mock.live.every(tab => !tab.discarded));
+  assert.deepEqual(await getStars(), { tabIds: [], groupIds: [] });
+  assert.equal(chrome.tabs.onUpdated.hasListeners(), false, "Unstarred page title churn must not wake the worker");
 });

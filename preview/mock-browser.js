@@ -34,7 +34,7 @@ function samples(fixture = "default") {
 let state;
 try { state = JSON.parse(localStorage.getItem(KEY)); } catch { /* Start fresh if preview data is invalid. */ }
 if (!state || state.version !== 1 || !Array.isArray(state.groups)) state = samples();
-state.settings = { removeAfterOpen: state.settings?.removeAfterOpen === true, includeNewTabs: state.settings?.includeNewTabs !== false };
+state.settings = { removeAfterOpen: state.settings?.removeAfterOpen === true, includeNewTabs: state.settings?.includeNewTabs !== false, starAllTabs: state.settings?.starAllTabs === true };
 
 function persist() {
   cleanLooseTabs(state);
@@ -49,7 +49,7 @@ async function handle(message) {
     case "GET_BROWSER": return { windowId: 1, tabCount: 0, groups: [] };
     case "GET_NOTICE": return null;
     case "UPDATE_SETTINGS": {
-      const preferences = ["removeAfterOpen", "includeNewTabs"].filter(key => message[key] !== undefined);
+      const preferences = ["removeAfterOpen", "includeNewTabs", "starAllTabs"].filter(key => message[key] !== undefined);
       if (!preferences.length || preferences.some(key => typeof message[key] !== "boolean")) throw new Error("Choose a valid setting.");
       for (const key of preferences) state.settings[key] = message[key];
       break;
