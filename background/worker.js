@@ -1,11 +1,11 @@
 import { COLORS, makeGroup, findGroup, findLink, moveLink, moveEntry, ungroupLink, groupLink, cleanLooseTabs, reindex, sortGroups, tabSnapshot, savableUrl, savableTabUrl } from "../shared/model.js";
-import { readState, writeState, exclusive } from "../shared/storage.js";
+import { readState, writeState, exclusive, cacheSettings } from "../shared/storage.js";
 import { rebuildMenus } from "./menus.js";
 import { fetchPageTitle, linkText } from "./titles.js";
 import { openSavedGroup, openSavedLink, activateLazy, LAZY_BASE } from "./open.js";
 import { prepareMove, commitMove, undoMove } from "./moves.js";
 import { savePage, saveBrowserGroup } from "./save.js";
-import { getStars, setTabStar, setGroupStar, getTabStar, refreshGroupIndicator, enforceStars, enforceStarredTab, removeTabStar, removeGroupStar, replaceTabStar, restoreStars } from "./stars.js";
+import { getStars, setTabStar, setGroupStar, getTabStar, refreshGroupIndicator, refreshStarPersistence, enforceStars, enforceStarredTab, removeTabStar, removeGroupStar, replaceTabStar, restoreStars, initializeStars, needsTabUpdates } from "./stars.js";
 import { requestIndicatorAccess, rememberTabTitle, cleanBrowserTabs, registerIndicators } from "./indicators.js";
 
 async function notice(message) {
@@ -28,7 +28,9 @@ async function handle(message, sender) {
   if (message.type === "GET_STARS") return getStars();
   if (["STAR_TAB", "STAR_BROWSER_GROUP"].includes(message.type)) {
     if (typeof message.starred !== "boolean") throw new Error("Choose whether to star or unstar.");
-    return message.type === "STAR_TAB" ? setTabStar(message.tabId, message.starred) : setGroupStar(message.tabId, message.starred);
+    const result = await (message.type === "STAR_TAB" ? setTabStar(message.tabId, message.starred) : setGroupStar(message.tabId, message.starred));
+    await syncTabUpdateListener();
+    return result;
   }
   if (message.type === "ACTIVATE_LAZY") {
     if (sender.tab && sender.tab.id !== message.tabId) throw new Error("A placeholder can only activate its own tab.");
@@ -38,7 +40,7 @@ async function handle(message, sender) {
   switch (message.type) {
     case "GET_STATE": return { version: state.version, groups: sortGroups(state.groups), undo: state.undo, settings: state.settings };
     case "UPDATE_SETTINGS": {
-      const preferences = ["removeAfterOpen", "includeNewTabs"].filter(key => message[key] !== undefined);
+      const preferences = ["removeAfterOpen", "includeNewTabs", "starAllTabs"].filter(key => message[key] !== undefined);
       if (!preferences.length || preferences.some(key => typeof message[key] !== "boolean")) throw new Error("Choose a valid setting.");
       for (const key of preferences) state.settings[key] = message[key];
       break;
@@ -132,6 +134,9 @@ async function handle(message, sender) {
   cleanLooseTabs(state);
   await writeState(state);
   await rebuildMenus(state);
+  if (message.type === "UPDATE_SETTINGS" && message.starAllTabs !== undefined) {
+    const result = await restoreStars(); await syncTabUpdateListener(); return result;
+  }
   return null;
 }
 
@@ -168,6 +173,7 @@ export async function handleContextMenu(info, tab) {
       if (menu.endsWith("native") && (!Number.isInteger(tab.groupId) || tab.groupId < 0)) throw new Error("Choose a tab inside a browser group.");
       const access = starred ? await requestIndicatorAccess() : true;
       const result = menu.endsWith("native") ? await setGroupStar(tab.id, starred) : await setTabStar(tab.id, starred);
+      await syncTabUpdateListener();
       if (!access) result.warnings.push("Allow optional website access to show ★ on loaded webpage tabs.");
       await notice(result.message + (result.warnings.length ? ` ${result.warnings.join(" ")}` : "")); return;
     }
@@ -229,25 +235,40 @@ chrome.tabs.onReplaced.addListener((addedTabId, removedTabId) => {
   replaceTabStar(addedTabId, removedTabId).then(() => starTask(enforceStarredTab(addedTabId))).catch(report);
   exclusive(() => activateLazy(addedTabId)).catch(report);
 });
-chrome.tabs.onCreated.addListener(tab => { starTask(enforceStarredTab(tab.id)); });
-chrome.tabs.onAttached.addListener(tabId => { starTask(enforceStarredTab(tabId)); });
-chrome.tabs.onRemoved.addListener(tabId => { removeTabStar(tabId).catch(report); });
-chrome.tabGroups.onRemoved.addListener(group => { removeGroupStar(group.id).catch(report); });
-chrome.tabGroups.onUpdated.addListener(group => { refreshGroupIndicator(group.id).catch(report); });
+chrome.tabs.onCreated.addListener(tab => { starTask(enforceStarredTab(tab.id, { persist: true })); });
+chrome.tabs.onAttached.addListener(tabId => { starTask(enforceStarredTab(tabId, { persist: true })); });
+chrome.tabs.onMoved.addListener(tabId => { refreshStarPersistence(tabId).catch(report); });
+chrome.tabs.onRemoved.addListener((tabId, info) => { removeTabStar(tabId, info).then(syncTabUpdateListener).catch(report); });
+chrome.tabGroups.onRemoved.addListener(group => { removeGroupStar(group.id, group.windowId).then(syncTabUpdateListener).catch(report); });
+chrome.tabGroups.onCreated?.addListener(group => { starTask(refreshGroupIndicator(group.id)); });
+chrome.tabGroups.onUpdated.addListener(group => { starTask(refreshGroupIndicator(group.id)); });
 chrome.permissions.onAdded.addListener(() => { registerIndicators().catch(report); });
-chrome.tabs.onUpdated.addListener((tabId, changes, tab) => {
-  if (changes.groupId !== undefined || changes.url || changes.status || changes.discarded === false) starTask(enforceStarredTab(tabId));
+function onTabUpdated(tabId, changes, tab) {
+  if (changes.groupId !== undefined || changes.url || changes.status || changes.discarded === false) starTask(enforceStarredTab(tabId, { persist: changes.groupId !== undefined || Boolean(changes.url) }));
   if (tab.active && (changes.status === "complete" || changes.url)) exclusive(() => activateLazy(tabId)).catch(report);
-});
+}
+// Chrome title-change events can keep a worker awake on busy pages. Subscribe
+// only while stars or pending restoration need navigation/membership updates.
+chrome.tabs.onUpdated.addListener(onTabUpdated);
+async function syncTabUpdateListener() {
+  if (await needsTabUpdates()) {
+    if (!chrome.tabs.onUpdated.hasListener?.(onTabUpdated)) chrome.tabs.onUpdated.addListener(onTabUpdated);
+  } else chrome.tabs.onUpdated.removeListener(onTabUpdated);
+}
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && changes.tabHarbor) exclusive(async () => rebuildMenus(await readState())).catch(report);
+  if (area !== "local" || !changes.tabHarbor) return;
+  cacheSettings(changes.tabHarbor.newValue?.settings);
+  if (changes.tabHarbor.oldValue?.settings?.starAllTabs !== changes.tabHarbor.newValue?.settings?.starAllTabs) syncTabUpdateListener().catch(report);
+  exclusive(async () => rebuildMenus(await readState())).catch(report);
 });
 chrome.runtime.onInstalled.addListener(() => { exclusive(async () => rebuildMenus(await readState(), true)).catch(report); });
 chrome.runtime.onStartup.addListener(() => {
+  starTask(restoreStars().then(async result => { await syncTabUpdateListener(); return result; }));
   exclusive(async () => {
     await rebuildMenus(await readState(), true);
     for (const tab of await chrome.tabs.query({ active: true })) await activateLazy(tab.id);
   }).catch(report);
 });
-exclusive(async () => rebuildMenus(await readState())).catch(report);
-starTask(restoreStars());
+// Browser menus persist while the worker sleeps. Build them on install/startup
+// or a library edit; ordinary tab events must not read the saved library.
+starTask(initializeStars().then(async result => { await syncTabUpdateListener(); return result; }));

@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mockChrome, tab } from "./mock-chrome.js";
+import { initialState, lazyUrl } from "../shared/model.js";
+import { writeState } from "../shared/storage.js";
 
 let moduleId = 0;
 async function setup(options = {}) {
@@ -9,6 +11,102 @@ async function setup(options = {}) {
   return { ...mock, ...stars };
 }
 const group = { id: 7, title: "Work", color: "blue", collapsed: false, windowId: 1 };
+
+test("star-all mode applies immediately across windows without changing manual stars or the saved library", async () => {
+  const mock = await setup({ tabs: [tab(1), tab(2, { pinned: true }), tab(3, { windowId: 2, active: true }), tab(4, { windowId: 2 })] });
+  const state = initialState(); state.settings.starAllTabs = true;
+  mock.data.tabHarbor = structuredClone(state);
+  assert.deepEqual((await mock.restoreStars()).warnings, []);
+  assert.deepEqual(mock.live.map(tab => tab.discarded), [false, true, false, true]);
+  assert.deepEqual(await mock.getTabStar(1), { starred: true });
+  assert.deepEqual(await mock.getTabStar(2), { starred: true });
+  assert.deepEqual(await mock.getStars(), { tabIds: [], groupIds: [] });
+  assert.deepEqual(mock.data.tabHarbor, state);
+  assert.ok(mock.live[1].pinned);
+  assert.ok(!mock.log.some(item => item[0] === "create" || item[0] === "remove"));
+});
+
+test("star-all mode covers new and restored tabs and keeps each window's selected tab loaded", async () => {
+  const mock = await setup({ tabs: [tab(1), tab(2, { windowId: 2, active: true })] });
+  mock.data.tabHarbor = initialState(); mock.data.tabHarbor.settings.starAllTabs = true;
+  await writeState(mock.data.tabHarbor);
+  const inactive = await mock.chrome.tabs.create({ url: "https://example.com/new", active: false });
+  await mock.enforceStarredTab(inactive.id);
+  assert.equal(mock.live.find(tab => tab.id === inactive.id).discarded, true);
+  const active = await mock.chrome.tabs.create({ url: "https://example.com/active", active: true });
+  mock.live.find(tab => tab.id === 2).active = true;
+  await mock.enforceStarredTab(active.id);
+  assert.equal(mock.live.find(tab => tab.id === active.id).discarded, false);
+  await mock.enforceStars(1);
+  assert.equal(mock.live.find(tab => tab.id === 1).discarded, true);
+  assert.equal(mock.live.find(tab => tab.id === 2).discarded, false);
+  const url = lazyUrl(mock.chrome.runtime.getURL("pages/lazy.html"), { url: "https://example.com/restored", title: "Restored" });
+  const restored = await mock.chrome.tabs.create({ url, active: false });
+  assert.deepEqual(await mock.getTabStar(restored.id), { starred: true });
+  await mock.enforceStarredTab(restored.id);
+  assert.equal(mock.live.find(tab => tab.id === restored.id).discarded, true);
+});
+
+test("star-all mode survives a new browser session and Brave replacement tab IDs", async () => {
+  const mock = await setup({ tabs: [tab(1), tab(2)], discardRemaps: true });
+  mock.data.tabHarbor = initialState(); mock.data.tabHarbor.settings.starAllTabs = true;
+  await writeState(mock.data.tabHarbor);
+  await mock.enforceStars(1);
+  const replacementId = mock.live[1].id;
+  assert.notEqual(replacementId, 2);
+  mock.live[1].discarded = false;
+  for (const key of Object.keys(mock.sessionData)) delete mock.sessionData[key];
+  const restarted = await import(`../background/stars.js?test=${moduleId++}`);
+  await restarted.restoreStars();
+  assert.equal(mock.live[1].discarded, true);
+  assert.deepEqual(await restarted.getTabStar(mock.live[1].id), { starred: true });
+  assert.deepEqual(await restarted.getStars(), { tabIds: [], groupIds: [] });
+});
+
+test("turning star-all off stops automatic discarding and preserves manual tab and group stars", async () => {
+  const mock = await setup({ tabs: [tab(1), tab(2), tab(3, { groupId: 7 }), tab(4)], groups: [group] });
+  await mock.setTabStar(2, true); await mock.setGroupStar(3, true);
+  const manual = await mock.getStars();
+  mock.data.tabHarbor = initialState(); mock.data.tabHarbor.settings.starAllTabs = true;
+  await writeState(mock.data.tabHarbor);
+  await mock.restoreStars();
+  mock.data.tabHarbor.settings.starAllTabs = false;
+  await writeState(mock.data.tabHarbor);
+  await mock.restoreStars();
+  assert.ok(mock.live.slice(1).every(tab => tab.discarded), "Disabling must not reload websites");
+  assert.deepEqual(await mock.getStars(), manual);
+  assert.deepEqual(await mock.getTabStar(1), { starred: false });
+  assert.deepEqual(await mock.getTabStar(2), { starred: true });
+  assert.deepEqual(await mock.getTabStar(3), { starred: true });
+  assert.deepEqual(await mock.getTabStar(4), { starred: false });
+  for (const tab of mock.live) tab.discarded = false;
+  await mock.enforceStars(1);
+  assert.deepEqual(mock.live.map(tab => tab.discarded), [false, true, true, false]);
+});
+
+test("removing manual stars while star-all is on keeps the global behavior until disabled", async () => {
+  const mock = await setup({ tabs: [tab(1, { groupId: 7 }), tab(2, { groupId: 7 })], groups: [group] });
+  mock.data.tabHarbor = initialState(); mock.data.tabHarbor.settings.starAllTabs = true;
+  await writeState(mock.data.tabHarbor);
+  await mock.setTabStar(1, true); await mock.setGroupStar(1, true);
+  assert.match((await mock.setTabStar(1, false)).message, /still follows Star all/);
+  assert.match((await mock.setGroupStar(1, false)).message, /still follow Star all/);
+  assert.deepEqual(await mock.getStars(), { tabIds: [], groupIds: [] });
+  assert.deepEqual(await mock.getTabStar(1), { starred: true });
+  mock.data.tabHarbor.settings.starAllTabs = false;
+  await writeState(mock.data.tabHarbor);
+  assert.deepEqual(await mock.getTabStar(1), { starred: false });
+});
+
+test("star-all skips protected pages, includes New Tab and blank pages, and reports discard failures", async () => {
+  const mock = await setup({ tabs: [tab(1), tab(2, { url: "chrome://settings" }), tab(3, { url: "brave://newtab/" }), tab(4, { url: "about:blank" })], failDiscard: true });
+  mock.data.tabHarbor = initialState(); mock.data.tabHarbor.settings.starAllTabs = true;
+  const result = await mock.enforceStars();
+  assert.equal(result.warnings.length, 2);
+  assert.deepEqual(await mock.getTabStar(2), { starred: false });
+  assert.deepEqual(mock.log.filter(item => item[0] === "discard").map(item => item[1]), [3, 4]);
+  assert.ok(mock.live.every(tab => !tab.discarded));
+});
 
 test("starring an active browser tab keeps it loaded and discards it when selection changes", async () => {
   const mock = await setup({ tabs: [tab(1), tab(2)] });
@@ -19,7 +117,7 @@ test("starring an active browser tab keeps it loaded and discards it when select
   assert.equal(mock.live[0].discarded, true); assert.equal(mock.live[1].discarded, false);
   assert.equal(mock.live[0].url, "https://example.com/1"); assert.equal(mock.live[0].id, 1);
   assert.deepEqual((await mock.getStars()).tabIds, [1]);
-  assert.deepEqual(mock.data, {}, "Starring never adds pages to the saved library");
+  assert.equal(mock.data.tabHarbor, undefined, "Starring never adds pages to the saved library");
 });
 
 test("starring an inactive tab discards it immediately while unrelated tabs stay loaded", async () => {

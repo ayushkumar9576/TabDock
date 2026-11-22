@@ -118,15 +118,20 @@ try {
 
   await menuClick("star-native", second);
   const finalFirstId = await id(first);
-  await evaluate(`chrome.tabs.query({}).then(tabs=>chrome.tabs.remove(tabs.filter(tab=>tab.url?.startsWith(${JSON.stringify(`${site}/`)})).map(tab=>tab.id)))`);
+  await evaluate(`chrome.tabs.query({}).then(tabs=>chrome.tabs.remove(tabs.filter(tab=>{const url=tab.url?.startsWith(chrome.runtime.getURL('pages/lazy.html')+'#')?new URLSearchParams(new URL(tab.url).hash.slice(1)).get('url'):tab.url;return url?.startsWith(${JSON.stringify(`${site}/`)});}).map(tab=>tab.id)))`);
   await evaluate(`chrome.windows.remove(${testWindowId})`).catch(() => { }); testWindowId = null;
   await poll(async () => { const stars = await call("GET_STARS"); return !stars.tabIds.includes(finalFirstId) && !stars.groupIds.includes(groupId); });
   assert.deepEqual(connection.events.filter(event => event.method === "Runtime.exceptionThrown"), []);
   console.log(`PASS: browser tab/group stars, group symbols, original saved titles, group inheritance, unstar cleanup, immediate discard, automatic reload, and closed-tab cleanup. Webpage symbol checks: ${indicators ? "passed" : "skipped (grant optional localhost access in the isolated profile)"}.`);
   if (process.argv.includes("--close")) await connection.send("Browser.close");
+} catch (error) {
+  if (testWindowId && evaluate) console.error(JSON.stringify({ error: error.message, windowId: testWindowId,
+    tabs: await evaluate(`chrome.tabs.query({windowId:${testWindowId}})`), window: await evaluate(`chrome.windows.get(${testWindowId})`),
+    stars: await evaluate("chrome.storage.session.get(null)"), errors: connection?.events.filter(event => event.method === "Runtime.exceptionThrown") }, null, 2));
+  throw error;
 } finally {
   if (testWindowId && evaluate) {
-    await evaluate(`chrome.tabs.query({}).then(tabs=>chrome.tabs.remove(tabs.filter(tab=>tab.url?.startsWith(${JSON.stringify(`${site}/`)})).map(tab=>tab.id)))`).catch(() => { });
+    await evaluate(`chrome.tabs.query({}).then(tabs=>chrome.tabs.remove(tabs.filter(tab=>{const url=tab.url?.startsWith(chrome.runtime.getURL('pages/lazy.html')+'#')?new URLSearchParams(new URL(tab.url).hash.slice(1)).get('url'):tab.url;return url?.startsWith(${JSON.stringify(`${site}/`)});}).map(tab=>tab.id)))`).catch(() => { });
     await evaluate(`chrome.windows.remove(${testWindowId})`).catch(() => { });
   }
   connection?.close(); await new Promise(resolve => server.close(resolve));

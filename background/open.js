@@ -6,7 +6,14 @@ export async function activateLazy(tabId) {
   let tab;
   try { tab = await chrome.tabs.get(tabId); } catch { return false; }
   const link = parseLazyUrl(tab.pendingUrl || tab.url, LAZY_BASE);
-  if (!link || !tab.active) return false;
+  if (!tab.active) return false;
+  if (!link) {
+    // Brave can leave a selected native discarded tab unloaded, particularly
+    // after replacing its ID. Reload only that selected, still-discarded page.
+    if (!tab.discarded || !savableTabUrl(tab.pendingUrl || tab.url)) return false;
+    await chrome.tabs.reload(tabId);
+    return true;
+  }
   await chrome.tabs.update(tabId, { url: link.url });
   return true;
 }

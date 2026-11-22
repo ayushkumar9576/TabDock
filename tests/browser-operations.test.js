@@ -6,6 +6,15 @@ mockChrome();
 const { prepareMove, commitMove, undoMove } = await import("../background/moves.js");
 const { openGroup, LAZY_BASE, activateLazy } = await import("../background/open.js");
 
+test("selecting a native discarded page reloads it without waking inactive or already loaded pages", async () => {
+  const mock = mockChrome({ tabs: [tab(1, { discarded: true }), tab(2, { discarded: true }), tab(3)] });
+  assert.equal(await activateLazy(1), true);
+  assert.equal(await activateLazy(2), false);
+  assert.equal(await activateLazy(1), false);
+  assert.deepEqual(mock.log.filter(item => item[0] === "reload"), [["reload", 1]]);
+  assert.equal(mock.live[0].discarded, false); assert.equal(mock.live[1].discarded, true);
+});
+
 test("window parking skips pinned and internal pages and copies native metadata/order", async () => {
   mockChrome({ tabs: [tab(1, { pinned: true }), tab(2, { url: "chrome://settings" }), tab(3, { groupId: 7 }), tab(4, { groupId: 7 })], groups: [{ id: 7, title: "Watch later", color: "red", collapsed: true, windowId: 1 }] });
   const plan = await prepareMove(initialState(), { scope: "window", windowId: 1 });

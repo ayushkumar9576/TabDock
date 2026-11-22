@@ -7,15 +7,37 @@ const TAB_BACKUP_KEY = "tabDockTitleMarkerOwnership";
 const SCRIPT_ID = "tabdock-star-indicator";
 export const INDICATOR_ORIGINS = ["http://*/*", "https://*/*"];
 let tail = Promise.resolve();
-function exclusive(task) {
-  const operation = tail.then(task); tail = operation.catch(() => { }); return operation;
+let cacheOwner, tabCache, groupCache, tabSignature, groupSignature, backupSignature;
+function cacheContext() {
+  if (cacheOwner === chrome) return;
+  cacheOwner = chrome; tabCache = groupCache = tabSignature = groupSignature = backupSignature = undefined;
 }
-const tabMarkers = async () => (await chrome.storage.session.get(TAB_KEY))[TAB_KEY] || {};
-const groupMarkers = async () => (await chrome.storage.local.get(GROUP_KEY))[GROUP_KEY] || {};
+function exclusive(task) {
+  const operation = tail.then(task); tail = operation.then(() => { }, () => { }); return operation;
+}
+async function tabMarkers() {
+  cacheContext();
+  if (!tabCache) { tabCache = (await chrome.storage.session.get(TAB_KEY))[TAB_KEY] || {}; tabSignature = JSON.stringify(tabCache); }
+  return tabCache;
+}
+async function groupMarkers() {
+  cacheContext();
+  if (!groupCache) { groupCache = (await chrome.storage.local.get(GROUP_KEY))[GROUP_KEY] || {}; groupSignature = JSON.stringify(groupCache); }
+  return groupCache;
+}
 async function writeTabMarkers(markers) {
+  const signature = JSON.stringify(markers);
+  if (signature === tabSignature && (backupSignature === undefined || signature === backupSignature)) return;
   await chrome.storage.session.set({ [TAB_KEY]: markers });
   // Ownership is durable so stale symbols can be removed when session stars reset.
   await chrome.storage.local.set({ [TAB_BACKUP_KEY]: markers });
+  tabCache = markers; tabSignature = backupSignature = signature;
+}
+async function writeGroupMarkers(markers) {
+  const signature = JSON.stringify(markers);
+  if (signature === groupSignature) return;
+  await chrome.storage.local.set({ [GROUP_KEY]: markers });
+  groupCache = markers; groupSignature = signature;
 }
 async function pageAccess(url) {
   if (!savableUrl(url) || !chrome.permissions?.contains) return false;
@@ -24,10 +46,11 @@ async function pageAccess(url) {
 }
 export function registerIndicators() {
   return exclusive(async () => {
-    if (!chrome.scripting?.registerContentScripts) return;
-    if (!await chrome.permissions.contains({ origins: INDICATOR_ORIGINS })) return;
+    if (!chrome.scripting?.getRegisteredContentScripts || !chrome.scripting?.unregisterContentScripts) return;
     const registered = await chrome.scripting.getRegisteredContentScripts({ ids: [SCRIPT_ID] });
-    if (!registered.length) await chrome.scripting.registerContentScripts([{ id: SCRIPT_ID, matches: INDICATOR_ORIGINS, js: ["content/star-indicator.js"], runAt: "document_idle" }]);
+    // Migrate the old global injector. Loaded starred pages are injected on demand
+    // by syncTabIndicator; unstarred sites need no TabDock script or observer.
+    if (registered.length) await chrome.scripting.unregisterContentScripts({ ids: [SCRIPT_ID] });
   });
 }
 export async function requestIndicatorAccess() {
@@ -65,20 +88,24 @@ export async function cleanBrowserTabs(tabs) {
   const markers = await tabMarkers();
   return tabs.map(tab => {
     const marker = markers[tab.id];
-    return marker && tab.title === marker.displayed ? { ...tab, title: marker.title } : tab;
+    return marker && marker.url === (tab.pendingUrl || tab.url) && tab.title?.startsWith("★ ") ? { ...tab, title: tab.title.slice(2) } : tab;
   });
 }
 export async function cleanBrowserGroup(group) {
   const marker = (await groupMarkers())[group.id];
   return marker && group.title === marker.displayed ? { ...group, title: marker.title } : group;
 }
-export function restoreTabMarkerOwnership(tabs) {
+export function restoreTabMarkerOwnership(tabs, starredTabIds = []) {
   return exclusive(async () => {
     const markers = Object.fromEntries(Object.entries(await tabMarkers()).filter(([id]) => tabs.some(tab => tab.id === Number(id))));
     const backup = (await chrome.storage.local.get(TAB_BACKUP_KEY))[TAB_BACKUP_KEY] || {};
+    backupSignature = JSON.stringify(backup);
+    const ownedByDisplay = new Map(Object.values(backup).map(marker => [`${marker.url}\n${marker.displayed}`, marker]));
+    const ownedByUrl = new Map(Object.values(backup).map(marker => [marker.url, marker]));
+    const starred = new Set(starredTabIds);
     for (const tab of tabs) {
-      const owned = backup[tab.id] || Object.values(backup).find(marker => marker.url === tab.url && marker.displayed === tab.title);
-      if (owned && tab.title === owned.displayed && owned.url === tab.url) markers[tab.id] = owned;
+      const owned = ownedByDisplay.get(`${tab.url}\n${tab.title}`) || (starred.has(tab.id) && ownedByUrl.get(tab.url));
+      if (owned && owned.url === tab.url && tab.title?.startsWith("★ ")) markers[tab.id] = { title: tab.title.slice(2), displayed: tab.title, url: tab.url };
     }
     await writeTabMarkers(markers);
   });
@@ -93,7 +120,7 @@ export function syncGroupIndicator(groupId, starred) {
     if (group.title !== displayed) await chrome.tabGroups.update(groupId, { title: displayed });
     if (starred) markers[groupId] = { title, displayed };
     else delete markers[groupId];
-    if (starred || previous) await chrome.storage.local.set({ [GROUP_KEY]: markers });
+    if (starred || previous) await writeGroupMarkers(markers);
   });
 }
 export function restoreGroupIndicators(stars) {
@@ -101,14 +128,17 @@ export function restoreGroupIndicators(stars) {
     if (!chrome.tabGroups.query) return;
     const markers = await groupMarkers();
     const groups = await chrome.tabGroups.query({});
+    const live = {};
     for (const group of groups) {
-      if (stars.groupIds.includes(group.id)) continue;
       // Local ownership records also remove stale symbols after a browser restart.
       const owned = markers[group.id] || Object.values(markers).find(marker => marker.displayed === group.title);
+      if (stars.groupIds.includes(group.id)) {
+        if (owned && group.title === owned.displayed) live[group.id] = owned;
+        continue;
+      }
       if (owned && group.title === owned.displayed) await chrome.tabGroups.update(group.id, { title: owned.title });
     }
-    const live = Object.fromEntries(Object.entries(markers).filter(([id]) => stars.groupIds.includes(Number(id))));
-    await chrome.storage.local.set({ [GROUP_KEY]: live });
+    await writeGroupMarkers(live);
   });
 }
 export function syncTabIndicator(candidate, starred, { force = false } = {}) {

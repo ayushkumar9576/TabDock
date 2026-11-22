@@ -27,7 +27,7 @@ export function mockChrome({ tabs = [], groups = [], failRemove = [], failCreate
       getAll: async () => [{ id: 1, type: "normal", focused: true }],
     },
     tabs: {
-      onUpdated: { addListener: fn => listeners.add(fn), removeListener: fn => listeners.delete(fn) },
+      onUpdated: { addListener: fn => listeners.add(fn), removeListener: fn => listeners.delete(fn), hasListener: fn => listeners.has(fn), hasListeners: () => listeners.size > 0 },
       get: async tabId => structuredClone(getTab(tabId)),
       query: async query => structuredClone(live.filter(tab => (!query.windowId || tab.windowId === query.windowId) && (!query.active || tab.active) && (query.groupId === undefined || tab.groupId === query.groupId))),
       create: async properties => {
@@ -58,6 +58,7 @@ export function mockChrome({ tabs = [], groups = [], failRemove = [], failCreate
         if (properties.active) live.forEach(tab => { tab.active = false; });
         Object.assign(getTab(tabId), properties); return structuredClone(getTab(tabId));
       },
+      reload: async tabId => { log.push(["reload", tabId]); const tab = getTab(tabId); tab.discarded = false; tab.status = "complete"; },
       group: async properties => {
         const groupId = properties.groupId ?? nextGroup++;
         if (!native.has(groupId)) native.set(groupId, { id: groupId, windowId: 1, title: "", color: "grey", collapsed: false });
@@ -66,6 +67,7 @@ export function mockChrome({ tabs = [], groups = [], failRemove = [], failCreate
       },
     },
     tabGroups: {
+      query: async query => structuredClone([...native.values()].filter(group => query.windowId === undefined || group.windowId === query.windowId)),
       get: async groupId => { if (!native.has(groupId)) throw new Error("No group"); return structuredClone(native.get(groupId)); },
       update: async (groupId, properties) => { if (!native.has(groupId)) throw new Error("No group"); Object.assign(native.get(groupId), properties); return structuredClone(native.get(groupId)); },
     },
